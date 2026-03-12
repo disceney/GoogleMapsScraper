@@ -1,110 +1,118 @@
-# Scrapper
+# GoogleMapsScraper
 
-Ce projet contient deux scripts Python basés sur Playwright.
+Ce projet permet de lancer automatiquement des recherches Google Maps par **catégorie** et **code postal**, puis d’enregistrer les entreprises trouvées dans `companies.csv`.
 
-Le workflow est le suivant :
+Le fonctionnement est simple :
 
-1. Générer la liste des catégories Google Business dans `categories.csv`
-2. Lancer la recherche Google Maps à partir d’une catégorie et d’un code postal
-3. Enregistrer les entreprises trouvées dans `companies.csv`
+1. vous préparez votre fichier `categories.csv` à la main ;
+2. vous lancez le script `google_maps.py` ;
+3. vous saisissez un code postal ;
+4. le script ouvre Google Maps, exécute chaque recherche catégorie par catégorie, ferme le navigateur, puis recommence avec la catégorie suivante ;
+5. les résultats sont enregistrés progressivement dans `companies.csv`, sans doublons.
 
-## Fichiers
+## Fichiers du projet
 
-- `categories.py` : récupère les catégories depuis PlePer et les enregistre dans `categories.csv`
-- `google_maps.py` : ouvre Google Maps, lance une recherche `<Category> - <Postal Code>` et enregistre les résultats dans `companies.csv`
-- `utils.py` : fonctions utilitaires de logs, pauses “humaines” et normalisation de texte
+* `google_maps.py` : script principal de scraping Google Maps
+* `categories.csv` : liste des catégories à rechercher
+* `companies.csv` : fichier de sortie contenant les entreprises trouvées
+* `utils.py` : fonctions utilitaires (logs, pauses, normalisation)
+* `requirements.txt` : dépendances Python du projet
 
 ## Prérequis
 
-- macOS
-- Google Chrome installé dans : `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
-- Python 3.14
+* macOS
+* Google Chrome installé à cet emplacement :
+  `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+* Python 3.11 ou plus récent
+* un fichier `categories.csv` rempli manuellement
 
 ## Installation
 
-```shell
-sudo rm -Rf .venv/
+Dans le dossier du projet, exécuter :
 
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
-
-python3 -m pip install --upgrade pip
-pip3 install --upgrade pip
-
-pip3 install -r ./requirements.txt --upgrade
+pip install --upgrade pip
+pip install -r requirements.txt
+playwright install
 ```
 
-## Utilisation
+## Préparer le fichier `categories.csv`
 
-### 1. Générer les catégories
+Le script lit les catégories depuis un fichier CSV contenant une colonne obligatoire nommée `category_name`.
 
-Lancer d’abord le script de récupération des catégories :
-
-```shell
-python3 categories.py
-```
-
-Ce script :
-
-- ouvre la page PlePer des catégories Google Business
-- parcourt les pages une par une
-- récupère les catégories uniques
-- enregistre le résultat dans `categories.csv`
-
-Fichier généré :
-
-```text
-categories.csv
-```
-
-Format attendu :
+Exemple minimal :
 
 ```csv
 category_name
-Centre Aadhar
-Concessionnaire Abarth
-Abbaye
-...
+Salon de coiffure
+Restaurant
+Boulangerie
+Centre équestre
 ```
 
-### 2. Lancer la recherche Google Maps
+Règles à respecter :
 
-Une fois `categories.csv` généré, lancer le script Google Maps :
+* la première ligne doit être `category_name`
+* une catégorie par ligne
+* les catégories sont traitées dans l’ordre du fichier
+* vous pouvez modifier ce fichier librement à la main avant chaque lancement
 
-```shell
+## Utilisation
+
+Lancer le script principal :
+
+```bash
 python3 google_maps.py
 ```
 
-Le script demande alors :
-
-- un code postal français
-- une catégorie existante dans `categories.csv`
-
-Il ouvre ensuite Google Maps avec une recherche de ce type :
-
-```text
-<Category> - <Postal Code>
-```
+Le script demandera uniquement un code postal français à 5 chiffres.
 
 Exemple :
 
 ```text
-Salon de coiffure - 94500
+83160
 ```
 
-## Résultat Google Maps
+Ensuite, pour chaque catégorie présente dans `categories.csv`, le script :
 
-Le script Google Maps :
+* construit une recherche Google Maps sous la forme `<Catégorie> - <Code postal>`
+* ouvre Chrome avec Playwright
+* charge la page de résultats Google Maps
+* parcourt les résultats visibles
+* clique sur chaque fiche pour charger les détails
+* extrait les informations disponibles
+* écrit chaque entreprise immédiatement dans `companies.csv`
+* ferme le navigateur en fin de catégorie
+* rouvre un navigateur pour la catégorie suivante
 
-- ouvre Google Maps dans Chrome via Playwright
-- charge la recherche à partir de la catégorie et du code postal
-- parcourt les résultats visibles dans la colonne de gauche
-- ouvre chaque fiche établissement
-- extrait les informations disponibles
-- écrit chaque entreprise au fur et à mesure dans `companies.csv`
-- évite les doublons déjà enregistrés
+## Exemple de recherche générée
 
-Fichier généré :
+Si `categories.csv` contient :
+
+```csv
+category_name
+Salon de coiffure
+Boulangerie
+```
+
+et que vous saisissez le code postal :
+
+```text
+83160
+```
+
+le script lancera successivement les recherches suivantes :
+
+```text
+Salon de coiffure - 83160
+Boulangerie - 83160
+```
+
+## Fichier de sortie `companies.csv`
+
+Les entreprises trouvées sont enregistrées dans ce fichier :
 
 ```text
 companies.csv
@@ -116,20 +124,110 @@ Colonnes enregistrées :
 business_name,category_name,postal_code,address,phone,website,rating,review_count,email,google_maps_url
 ```
 
-## Exemple de workflow complet
+Description rapide des colonnes :
 
-```shell
-# 1. Générer les catégories
-python3 categories.py
+* `business_name` : nom de l’établissement
+* `category_name` : catégorie détectée ou catégorie recherchée
+* `postal_code` : code postal utilisé pour la recherche
+* `address` : adresse de l’établissement
+* `phone` : numéro de téléphone
+* `website` : site web ou lien principal trouvé
+* `rating` : note Google
+* `review_count` : nombre d’avis
+* `email` : email détecté si disponible
+* `google_maps_url` : URL de la fiche Google Maps
 
-# 2. Lancer Google Maps
+## Gestion des doublons
+
+Le script évite d’enregistrer deux fois la même entreprise.
+
+La détection de doublons se fait en priorité via :
+
+* l’URL Google Maps
+* sinon le couple nom + adresse
+* sinon le couple nom + téléphone
+* sinon le nom seul
+
+Cela permet de relancer le script sans réécrire les lignes déjà présentes dans `companies.csv`.
+
+## Comportement du navigateur
+
+Pour chaque catégorie :
+
+* un navigateur est ouvert
+* la recherche Google Maps est exécutée directement par URL
+* les résultats sont parcourus progressivement
+* le navigateur est fermé à la fin
+
+Ce comportement permet de repartir sur une session propre entre deux catégories.
+
+## Conseils d’utilisation
+
+* vérifier que `categories.csv` contient uniquement les catégories utiles
+* commencer avec quelques catégories pour tester le comportement
+* ne pas modifier manuellement `companies.csv` pendant l’exécution
+* conserver le profil Chrome si vous souhaitez garder une session stable
+
+## Lancer un test simple
+
+Exemple de `categories.csv` :
+
+```csv
+category_name
+Centre équestre
+```
+
+Puis lancer :
+
+```bash
 python3 google_maps.py
 ```
 
-## Notes
+Entrer ensuite :
 
-- Il est recommandé d’exécuter `categories.py` avant `google_maps.py`
-- `google_maps.py` dépend du fichier `categories.csv`
-- Des pauses aléatoires sont ajoutées pour simuler un comportement humain
-- Les résultats sont enregistrés progressivement dans le CSV
-- Les doublons sont ignorés
+```text
+83160
+```
+
+La recherche exécutée sera :
+
+```text
+Centre équestre - 83160
+```
+
+## Dépannage
+
+Si le script ne fonctionne pas correctement, vérifier en priorité :
+
+* que Google Chrome est bien installé au chemin configuré
+* que `categories.csv` existe bien dans le dossier du projet
+* que la colonne `category_name` est présente
+* que le code postal saisi contient exactement 5 chiffres
+* que les dépendances ont bien été installées
+* que Playwright est bien installé
+
+## Commandes utiles
+
+Créer l’environnement virtuel et installer les dépendances :
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install
+```
+
+Lancer le scraper :
+
+```bash
+python3 google_maps.py
+```
+
+## Résumé
+
+* `categories.csv` est préparé à la main
+* le script demande seulement le code postal
+* chaque catégorie est recherchée automatiquement
+* le navigateur est fermé puis rouvert entre chaque catégorie
+* les résultats sont ajoutés progressivement dans `companies.csv`
+* les doublons sont ignorés

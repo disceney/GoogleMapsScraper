@@ -5,7 +5,6 @@ import re
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from playwright.sync_api import Locator, Page, sync_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -41,7 +40,7 @@ COMPANY_FIELDNAMES: list[str] = [
 
 def is_valid_french_postal_code (postal_code: str) -> bool :
 	cleaned_postal_code: str = postal_code.strip()
-	return re.fullmatch(pattern = r"\d{5}", string = cleaned_postal_code) is not None
+	return re.fullmatch(pattern = r"\d{2}|\d{5}", string = cleaned_postal_code) is not None
 
 
 def load_categories (file_path: str) -> list[str] :
@@ -98,67 +97,6 @@ def prompt_postal_code () -> str :
 			return postal_code
 		
 		log_error(message = "❌ Invalid postal code. Expected exactly 5 digits.")
-
-
-def prompt_category (categories: list[str]) -> str :
-	try :
-		from prompt_toolkit import prompt
-		from prompt_toolkit.completion import FuzzyWordCompleter
-		from prompt_toolkit.shortcuts import CompleteStyle
-		
-		completer = FuzzyWordCompleter(words = categories)
-		
-		log_info(message = "🔎 Start typing a category, then use arrow keys and press Enter.")
-		
-		while True :
-			user_input: str = prompt(
-				message = "🏷️ Category: ",
-				completer = completer,
-				complete_while_typing = True,
-				complete_style = CompleteStyle.MULTI_COLUMN,
-				reserve_space_for_menu = 10,
-			).strip()
-			
-			normalized_input: str = normalize_text(text = user_input).casefold()
-			
-			for category in categories :
-				if normalize_text(text = category).casefold() == normalized_input :
-					log_success(message = f"✅ Category selected: {category}")
-					return category
-			
-			log_warning(message = "⚠️ Please select an existing category from the suggestions.")
-	except Exception :
-		log_warning(message = "⚠️ prompt_toolkit unavailable. Falling back to plain input.")
-		
-		while True :
-			user_input = input("🏷️ Category: ").strip()
-			normalized_input = normalize_text(text = user_input).casefold()
-			
-			for category in categories :
-				if normalize_text(text = category).casefold() == normalized_input :
-					log_success(message = f"✅ Category selected: {category}")
-					return category
-			
-			log_warning(message = "⚠️ Please type an existing category from categories.csv.")
-
-
-def build_google_maps_url (category_name: str, postal_code: str) -> str :
-	query: str = quote(string = f"{category_name} - {postal_code}")
-	return GOOGLE_MAPS_SEARCH_URL.format(query = query)
-
-
-def open_google_maps_search (page: Page, category_name: str, postal_code: str) -> None :
-	google_maps_url: str = build_google_maps_url(
-		category_name = category_name,
-		postal_code = postal_code,
-	)
-	
-	log_info(message = f"🗺️ Opening Google Maps URL: {google_maps_url}")
-	page.goto(url = google_maps_url, wait_until = "domcontentloaded")
-	
-	wait_for_results_panel(page = page)
-	human_sleep_before_parse()
-	log_success(message = f"✅ Search launched: {category_name} - {postal_code}")
 
 
 def ensure_companies_csv (file_path: str) -> None :
@@ -751,6 +689,44 @@ def scrape_results_progressively (page: Page, category_name: str, postal_code: s
 	return total_saved_now
 
 
+def run_category_search (playwright: Any, category_name: str, postal_code: str) -> int :
+	google_maps_url: str = build_google_maps_url(
+		category_name = category_name,
+		postal_code = postal_code,
+	)
+	
+	context = launch_maps_context(playwright = playwright)
+	
+	try :
+		page = context.new_page()
+		
+		log_info(message = f"🗺️ Opening Google Maps for: {category_name} - {postal_code}")
+		page.goto(url = google_maps_url, wait_until = "domcontentloaded")
+		
+		try :
+			wait_for_results_panel(page = page)
+		except PlaywrightTimeoutError :
+			log_warning(message = f"⚠️ Google Maps results panel did not load for: {category_name}")
+			return 0
+		
+		human_sleep_before_parse()
+		
+		total_saved_now: int = scrape_results_progressively(
+			page = page,
+			category_name = category_name,
+			postal_code = postal_code,
+		)
+		
+		log_success(
+			message = f"✅ Finished category '{category_name}' with {total_saved_now} new companies"
+		)
+		return total_saved_now
+	
+	finally :
+		log_info(message = f"🔒 Closing browser for category: {category_name}")
+		context.close()
+
+
 def main () -> None :
 	try :
 		categories: list[str] = load_categories(file_path = CATEGORIES_FILE)
@@ -759,40 +735,27 @@ def main () -> None :
 		return
 	
 	postal_code: str = prompt_postal_code()
-	category_name: str = prompt_category(categories = categories)
+	ensure_companies_csv(file_path = COMPANIES_FILE)
+	
+	grand_total_saved: int = 0
 	
 	with sync_playwright() as playwright :
-		context = launch_maps_context(playwright = playwright)
-		page = context.new_page()
-		
-		try :
-			open_google_maps_search(
-				page = page,
-				category_name = category_name,
-				postal_code = postal_code,
-			)
-		except PlaywrightTimeoutError :
-			log_error(message = "❌ Google Maps results panel did not load.")
-			context.close()
-			return
-		except Exception as error :
-			log_error(message = f"❌ Failed to open Google Maps search: {error}")
-			context.close()
-			return
-		
-		try :
-			total_saved_now: int = scrape_results_progressively(
-				page = page,
-				category_name = category_name,
-				postal_code = postal_code,
-			)
-		except Exception as error :
-			log_error(message = f"❌ Failed during scraping: {error}")
-			context.close()
-			return
-		
-		log_success(message = f"🎉 Done: {total_saved_now} new companies saved to '{COMPANIES_FILE}'")
-		context.close()
+		for index, category_name in enumerate(categories, start = 1) :
+			log_info(message = f"📂 Category {index} / {len(categories)} : {category_name}")
+			
+			try :
+				saved_count: int = run_category_search(
+					playwright = playwright,
+					category_name = category_name,
+					postal_code = postal_code,
+				)
+				grand_total_saved += saved_count
+			except Exception as error :
+				log_error(message = f"❌ Failed for category '{category_name}': {error}")
+	
+	log_success(
+		message = f"🎉 Done: {grand_total_saved} new companies saved to '{COMPANIES_FILE}'"
+	)
 
 
 if __name__ == "__main__" :
