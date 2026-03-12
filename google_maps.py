@@ -5,6 +5,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from playwright.sync_api import Locator, Page, sync_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -36,6 +37,11 @@ COMPANY_FIELDNAMES: list[str] = [
 	"email",
 	"google_maps_url",
 ]
+
+
+def build_google_maps_url (category_name: str, postal_code: str) -> str :
+	query: str = quote(string = f"{category_name} - {postal_code}")
+	return GOOGLE_MAPS_SEARCH_URL.format(query = query)
 
 
 def is_valid_french_postal_code (postal_code: str) -> bool :
