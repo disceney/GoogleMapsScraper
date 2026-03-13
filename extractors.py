@@ -38,25 +38,19 @@ def get_locator_attribute (page: Page, selectors: list[str], attribute_name: str
 
 
 def check_permanently_closed (page: Page) -> bool :
-	"""
-	Return True if the business is flagged as permanently closed.
-
-	Scoped to the detail panel (div[role="main"]) and uses exact text matching
-	to avoid false positives from stale DOM nodes of the previous business.
-	"""
 	detail_panel = page.locator(selector = 'div[role="main"]').first
-
+	
 	try :
 		if detail_panel.count() == 0 :
 			return False
 	except Exception :
 		return False
-
+	
 	closed_texts: list[str] = [
 		"Définitivement fermé",
 		"Permanently closed",
 	]
-
+	
 	for closed_text in closed_texts :
 		try :
 			locator = detail_panel.get_by_text(text = closed_text, exact = True).first
@@ -64,7 +58,7 @@ def check_permanently_closed (page: Page) -> bool :
 				return True
 		except Exception :
 			continue
-
+	
 	return False
 
 
@@ -192,30 +186,6 @@ def extract_rating (page: Page) -> str :
 	return ""
 
 
-def extract_email (page: Page) -> str :
-	mailto_href: str = get_locator_attribute(
-		page = page,
-		selectors = ['a[href^="mailto:"]'],
-		attribute_name = "href",
-	)
-	
-	if mailto_href.startswith("mailto:") :
-		return mailto_href.replace("mailto:", "", 1).strip()
-	
-	try :
-		body_text: str = page.locator(selector = "body").inner_text(timeout = 3000)
-		match = re.search(
-			pattern = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
-			string = body_text,
-		)
-		if match is not None :
-			return match.group(0)
-	except Exception :
-		pass
-	
-	return ""
-
-
 def extract_business_details (page: Page, category_name: str) -> dict[str, str] :
 	if check_permanently_closed(page = page) :
 		raise ValueError("Business is permanently closed.")
@@ -237,7 +207,6 @@ def extract_business_details (page: Page, category_name: str) -> dict[str, str] 
 	
 	rating: str = extract_rating(page = page)
 	review_count: str = extract_review_count(text = rating_block_text)
-	email: str = extract_email(page = page)
 	google_maps_url: str = page.url
 	
 	return {
@@ -248,6 +217,6 @@ def extract_business_details (page: Page, category_name: str) -> dict[str, str] 
 		"website" : website,
 		"rating" : rating,
 		"review_count" : review_count,
-		"email" : email,
+		"email" : "",
 		"google_maps_url" : google_maps_url,
 	}

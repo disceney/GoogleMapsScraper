@@ -75,6 +75,27 @@ def append_company_to_csv (file_path: str, company: dict[str, str]) -> None :
 		writer.writerow(company)
 
 
+def load_companies (file_path: str) -> list[dict[str, str]] :
+	path: Path = Path(file_path)
+	
+	if not path.exists() :
+		raise FileNotFoundError(f"Companies file not found: {file_path}")
+	
+	with open(file = file_path, mode = "r", encoding = "utf-8", newline = "") as file_handle :
+		reader = csv.DictReader(f = file_handle)
+		return list(reader)
+
+
+def save_companies (file_path: str, companies: list[dict[str, str]]) -> None :
+	with open(file = file_path, mode = "w", encoding = "utf-8", newline = "") as file_handle :
+		writer = csv.DictWriter(
+			f = file_handle,
+			fieldnames = COMPANY_FIELDNAMES,
+		)
+		writer.writeheader()
+		writer.writerows(companies)
+
+
 def build_company_keys (business_name: str, google_maps_url: str, category_name: str = "", address: str = "") -> list[str] :
 	keys: list[str] = []
 	normalized_name: str = normalize_text(text = business_name).casefold()
