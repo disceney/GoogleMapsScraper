@@ -25,12 +25,12 @@ def log_error (message: str) -> None :
 
 
 def human_sleep_before_parse () -> None :
-	delay: float = random.uniform(1.5, 4.0)
+	delay: float = random.uniform(.5, 1.5)
 	log_info(message = f"⏳ Human-like pause before parsing: {delay:.2f}s")
 	time.sleep(delay)
 
 
 def human_sleep_after_click () -> None :
-	delay: float = random.uniform(0.8, 2.2)
+	delay: float = random.uniform(.5, 1.5)
 	log_info(message = f"⏳ Human-like pause after click: {delay:.2f}s")
 	time.sleep(delay)

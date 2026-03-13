@@ -28,7 +28,6 @@ GOOGLE_MAPS_SEARCH_URL: str = "https://www.google.com/maps/search/{query}"
 COMPANY_FIELDNAMES: list[str] = [
 	"business_name",
 	"category_name",
-	"postal_code",
 	"address",
 	"phone",
 	"website",
@@ -39,14 +38,9 @@ COMPANY_FIELDNAMES: list[str] = [
 ]
 
 
-def build_google_maps_url (category_name: str, postal_code: str) -> str :
-	query: str = quote(string = f"{category_name} - {postal_code}")
+def build_google_maps_url (category_name: str, description: str) -> str :
+	query: str = quote(string = f"{category_name} - {description}")
 	return GOOGLE_MAPS_SEARCH_URL.format(query = query)
-
-
-def is_valid_french_postal_code (postal_code: str) -> bool :
-	cleaned_postal_code: str = postal_code.strip()
-	return re.fullmatch(pattern = r"\d{2}|\d{5}", string = cleaned_postal_code) is not None
 
 
 def load_categories (file_path: str) -> list[str] :
@@ -94,15 +88,10 @@ def load_categories (file_path: str) -> list[str] :
 	return categories
 
 
-def prompt_postal_code () -> str :
-	while True :
-		postal_code: str = input("📮 Enter a French postal code: ").strip()
-		
-		if is_valid_french_postal_code(postal_code = postal_code) :
-			log_success(message = f"✅ Postal code accepted: {postal_code}")
-			return postal_code
-		
-		log_error(message = "❌ Invalid postal code. Expected exactly 5 digits.")
+def prompt_description () -> str :
+	description: str = input("📮 Enter a French description (postal code, etc..): ").strip()
+	
+	return description
 
 
 def ensure_companies_csv (file_path: str) -> None :
@@ -400,7 +389,17 @@ def extract_email (page: Page) -> str :
 	return ""
 
 
-def extract_business_details (page: Page, category_name: str, postal_code: str) -> dict[str, str] :
+def extract_business_details (page: Page, category_name: str) -> dict[str, str] :
+	business_open: str = get_locator_text(
+		page = page,
+		selectors = [
+			'.fontBodyMedium span:has-text("Définitivement fermé")',
+		]
+	)
+	
+	if business_open == "Définitivement fermé" :
+		raise ValueError("This business is permanently closed.")
+	
 	business_name: str = get_locator_text(
 		page = page,
 		selectors = [
@@ -426,6 +425,9 @@ def extract_business_details (page: Page, category_name: str, postal_code: str) 
 			'button[class="DkEaL"]',
 		],
 	)
+	
+	if category_value and category_value != category_name :
+		raise ValueError("The business category does not match the search.")
 	
 	address: str = get_locator_text(
 		page = page,
@@ -484,7 +486,6 @@ def extract_business_details (page: Page, category_name: str, postal_code: str) 
 	return {
 		"business_name" : business_name,
 		"category_name" : category_value or category_name,
-		"postal_code" : postal_code,
 		"address" : address,
 		"phone" : phone,
 		"website" : website,
@@ -495,20 +496,19 @@ def extract_business_details (page: Page, category_name: str, postal_code: str) 
 	}
 
 
-def build_company_row (details: dict[str, str], summary: dict[str, str], category_name: str, postal_code: str, ) -> dict[str, str] :
+def build_company_row (details: dict[str, str], summary: dict[str, str], category_name: str) -> dict[str, str] :
 	business_name: str = details.get("business_name") or summary.get("business_name", "")
-	address: str = details.get("address") or summary.get("address_hint", "")
-	phone: str = details.get("phone") or summary.get("phone_hint", "")
-	website: str = details.get("website") or summary.get("website_hint", "")
-	rating: str = details.get("rating") or summary.get("rating_hint", "")
-	review_count: str = details.get("review_count") or summary.get("review_count_hint", "")
+	address: str = details.get("address", "")
+	phone: str = details.get("phone", "")
+	website: str = details.get("website", "")
+	rating: str = details.get("rating", "")
+	review_count: str = details.get("review_count", "")
 	email: str = details.get("email", "")
-	google_maps_url: str = details.get("google_maps_url") or summary.get("result_url", "")
+	google_maps_url: str = details.get("google_maps_url", "")
 	
 	return {
 		"business_name" : business_name,
 		"category_name" : details.get("category_name") or category_name,
-		"postal_code" : postal_code,
 		"address" : address,
 		"phone" : phone,
 		"website" : website,
@@ -519,7 +519,7 @@ def build_company_row (details: dict[str, str], summary: dict[str, str], categor
 	}
 
 
-def process_visible_results (page: Page, category_name: str, postal_code: str, saved_keys: set[str], ) -> int :
+def process_visible_results (page: Page, category_name: str, saved_keys: set[str], ) -> int :
 	summaries: list[dict[str, str]] = get_result_card_summaries(page = page)
 	new_saved_count: int = 0
 	
@@ -554,8 +554,7 @@ def process_visible_results (page: Page, category_name: str, postal_code: str, s
 		try :
 			details: dict[str, str] = extract_business_details(
 				page = page,
-				category_name = category_name,
-				postal_code = postal_code,
+				category_name = category_name
 			)
 		except Exception as error :
 			log_warning(message = f"⚠️ Failed to extract details for '{business_name}': {error}")
@@ -565,7 +564,6 @@ def process_visible_results (page: Page, category_name: str, postal_code: str, s
 			details = details,
 			summary = summary,
 			category_name = category_name,
-			postal_code = postal_code,
 		)
 		
 		row_key: str = build_company_key_from_values(
@@ -644,7 +642,7 @@ def scroll_feed_once (page: Page) -> tuple[int, int, int] :
 	)
 
 
-def scrape_results_progressively (page: Page, category_name: str, postal_code: str) -> int :
+def scrape_results_progressively (page: Page, category_name: str) -> int :
 	ensure_companies_csv(file_path = COMPANIES_FILE)
 	saved_keys: set[str] = load_existing_company_keys(file_path = COMPANIES_FILE)
 	
@@ -659,7 +657,6 @@ def scrape_results_progressively (page: Page, category_name: str, postal_code: s
 		saved_this_round: int = process_visible_results(
 			page = page,
 			category_name = category_name,
-			postal_code = postal_code,
 			saved_keys = saved_keys,
 		)
 		
@@ -695,10 +692,10 @@ def scrape_results_progressively (page: Page, category_name: str, postal_code: s
 	return total_saved_now
 
 
-def run_category_search (playwright: Any, category_name: str, postal_code: str) -> int :
+def run_category_search (playwright: Any, category_name: str, description: str) -> int :
 	google_maps_url: str = build_google_maps_url(
 		category_name = category_name,
-		postal_code = postal_code,
+		description = description,
 	)
 	
 	context = launch_maps_context(playwright = playwright)
@@ -706,7 +703,7 @@ def run_category_search (playwright: Any, category_name: str, postal_code: str) 
 	try :
 		page = context.new_page()
 		
-		log_info(message = f"🗺️ Opening Google Maps for: {category_name} - {postal_code}")
+		log_info(message = f"🗺️  Opening Google Maps for: {category_name} - {description}")
 		page.goto(url = google_maps_url, wait_until = "domcontentloaded")
 		
 		try :
@@ -719,8 +716,7 @@ def run_category_search (playwright: Any, category_name: str, postal_code: str) 
 		
 		total_saved_now: int = scrape_results_progressively(
 			page = page,
-			category_name = category_name,
-			postal_code = postal_code,
+			category_name = category_name
 		)
 		
 		log_success(
@@ -740,7 +736,7 @@ def main () -> None :
 		log_error(message = f"❌ {error}")
 		return
 	
-	postal_code: str = prompt_postal_code()
+	description: str = prompt_description()
 	ensure_companies_csv(file_path = COMPANIES_FILE)
 	
 	grand_total_saved: int = 0
@@ -753,7 +749,7 @@ def main () -> None :
 				saved_count: int = run_category_search(
 					playwright = playwright,
 					category_name = category_name,
-					postal_code = postal_code,
+					description = description,
 				)
 				grand_total_saved += saved_count
 			except Exception as error :
